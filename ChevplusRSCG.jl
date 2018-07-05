@@ -55,6 +55,11 @@ module ChevplusRSCG
     
     end
 
+
+
+
+
+
     function update_A!(A,Nx,Ny,μ,Δ,aa)
         for ii=1:Nx*Ny
             for jj=1:Nx*Ny
@@ -64,12 +69,24 @@ module ChevplusRSCG
         end
     end
 
+    function update_A2!(A,Nx,Ny,μ,HF,aa)
+        HFave = sum(HF)/(Nx*Ny)
+
+        for ii=1:Nx*Ny
+                jj = ii
+                A[ii,jj] = (-μ+(HF[ii,jj]-HFave))/aa
+                A[ii+Nx*Ny,jj+Nx*Ny] = -conj(A[ii,jj])
+        end
+    end
+
     
-    function iteration(nc,Nx,Ny,aa,bb,ωc,U,initialΔ,μ,full,RSCG,finite,T,omegamax,itemax)
+    function iteration(nc,Nx,Ny,aa,bb,ωc,U,initialΔ,μ,full,RSCG,finite,T,Hartree,omegamax,itemax)
 
         Δ = speye(Nx*Ny,Nx*Ny)*initialΔ
         Δold = speye(Nx*Ny,Nx*Ny)*initialΔ     
         A = calc_A(Nx,Ny,μ,Δ,aa)        
+        HF = speye(Nx*Ny,Nx*Ny)*0.01
+        HFold = copy(HF)*0.0 
 
         mat_Δ = zeros(typeof(Δ[1,1]),Nx,Ny)    
         
@@ -80,22 +97,42 @@ module ChevplusRSCG
                 if finite
                     #println("Green's function based full diazonalization")
                     @time Δ = rscg.calc_meanfields_full_finite(aa*A,Nx,Ny,Nx*Ny*2,T,omegamax) 
+                    if Hartree
+                        @time HF = rscg.calc_meanfields_full_finite_HF(aa*A,Nx,Ny,Nx*Ny*2,T,omegamax) 
+                    end
                 else
                     #println("Full diagonalization")
-                    @time Δ = chebyshev.calc_meanfields(A,Nx,Ny,ωc) 
+                    @time Δ = chebyshev.calc_meanfields(aa*A,Nx,Ny,ωc) 
+                    if Hartree
+                        @time HF = chebyshev.calc_meanfields_HF(aa*A,Nx,Ny,ωc) 
+                    end
                 end
             else
                 if RSCG
                     #println("RSCG")
+                    #Ab = aa*A
                     @time Δ =rscg.calc_meanfields_RSCG(1e-15,aa*A,Nx,Ny,Nx*Ny*2,T,omegamax)
+                    if Hartree
+                        @time HF =rscg.calc_meanfields_RSCG_HF(1e-15,aa*A,Nx,Ny,Nx*Ny*2,T,omegamax)
+                    end
                 else
                     #println("Chebyshev")
-                   @time Δ = chebyshev.calc_meanfields(nc,A,Nx,Ny,aa,bb,ωc)
+                    @time Δ = chebyshev.calc_meanfields(nc,A,Nx,Ny,aa,bb,ωc)
+                    if Hartree
+                        @time HF = chebyshev.calc_meanfields_HF(nc,A,Nx,Ny,aa,bb,ωc)
+                    end
                 end
             end
                       
             Δ = Δ*U
+            
             update_A!(A,Nx,Ny,μ,Δ,aa)
+            if Hartree
+                HF = HF*U
+
+                update_A2!(A,Nx,Ny,μ,HF,aa)
+            #    end
+            end
         
             eps = 0.0
             nor = 0.0
@@ -110,6 +147,7 @@ module ChevplusRSCG
                 break
             end
             Δold = Δ
+            HFold = HF
         
             fp = open("./gap.dat","w")
             for ix=1:Nx
@@ -120,8 +158,12 @@ module ChevplusRSCG
                 end
                  println(fp," ")
             end
-            println("center (Nx/2,Ny/2): ",mat_Δ[div(Nx,2),div(Ny,2)])
-            println("corner (1,1): ",mat_Δ[1,1])
+            if Hartree
+                println("V,Δ at center (Nx/2,Ny/2): ",HF[div(Nx,2),div(Ny,2)]," ",mat_Δ[div(Nx,2),div(Ny,2)])
+            else
+                println("Δ at center (Nx/2,Ny/2): ",mat_Δ[div(Nx,2),div(Ny,2)])
+            end
+            println("Δ at corner (1,1): ",mat_Δ[1,1])
             #plot(mat_Δ)
         
              
@@ -131,8 +173,12 @@ module ChevplusRSCG
         end
 
 
-    
-        return mat_Δ
+        if Hartree
+            return mat_Δ,HF
+        else
+            HF = spzeros(Nx*Ny,Nx*Ny)
+            return mat_Δ,HF
+        end
     
     end
 

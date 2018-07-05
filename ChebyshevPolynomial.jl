@@ -1,5 +1,5 @@
 module chebyshev
-    export calc_meanfields
+    export calc_meanfields,calc_meanfields_HF
 
     function calc_meanfields(nc,A,Nx,Ny,aa,bb,ωc)
         cc = spzeros(typeof(A[1,Nx*Ny]),Nx*Ny,Nx*Ny)
@@ -12,6 +12,19 @@ module chebyshev
             end
         end
         return cc
+    end
+
+    function calc_meanfields_HF(nc,A,Nx,Ny,aa,bb,ωc)
+        cdc = spzeros(typeof(A[1,Nx*Ny]),Nx*Ny,Nx*Ny)
+        for ix=1:Nx
+            for iy=1:Ny
+                ii = (iy-1)*Nx+ix
+                jj = ii# + Nx*Ny
+                vec_ai = calc_polynomials(nc,ii,jj,A)
+                cdc[ii,ii] = calc_meanfield(vec_ai,aa,bb,ωc,nc)
+            end
+        end
+        return cdc
     end
 
     function calc_meanfields(A,Nx,Ny,ωc)
@@ -39,6 +52,33 @@ module chebyshev
         end
         A = sparse(A)
         return cc
+    end
+
+    function calc_meanfields_HF(A,Nx,Ny,ωc)
+       
+        cdc = spzeros(typeof(A[1,Nx*Ny]),Nx*Ny,Nx*Ny)
+        A = full(A)
+        w,v = eig(A)
+        
+        
+    
+        for ix=1:Nx
+            for iy=1:Ny
+                ii = (iy-1)*Nx+ix
+                jj = ii# + Nx*Ny
+            
+                cdc[ii,ii] = 0.0
+                for i=1:Nx*Ny*2
+                    if w[i] <= 0.0
+                        if abs(w[i]) <= ωc
+                            cdc[ii,ii]+=conj(v[ii,i])*v[jj,i]
+                        end
+                    end
+                end
+            end
+        end
+        A = sparse(A)
+        return cdc
     end
 
     function calc_meanfield(vec_ai,aa,bb,ωc,nc)
