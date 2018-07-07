@@ -109,11 +109,11 @@ module ChevplusRSCG
                 end
             else
                 if RSCG
-                    #println("RSCG")
-                    #Ab = aa*A
-                    @time Δ =rscg.calc_meanfields_RSCG(1e-15,aa*A,Nx,Ny,Nx*Ny*2,T,omegamax)
+                    
                     if Hartree
-                        @time HF =rscg.calc_meanfields_RSCG_HF(1e-15,aa*A,Nx,Ny,Nx*Ny*2,T,omegamax)
+                        @time Δ,HF =rscg.calc_meanfields_RSCG_both(1e-15,aa*A,Nx,Ny,Nx*Ny*2,T,omegamax)
+                    else
+                        @time Δ =rscg.calc_meanfields_RSCG(1e-15,aa*A,Nx,Ny,Nx*Ny*2,T,omegamax)
                     end
                 else
                     #println("Chebyshev")

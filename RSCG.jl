@@ -41,7 +41,7 @@ module rscg
 #        print alpha,rsum
             
             for i=1:Ln
-                vec_x[i] = alpha*vec_p[i] #Line 7
+                vec_x[i] += alpha*vec_p[i] #Line 7
                 vec_r[i] += -alpha*vec_Ap[i]#Line 8
             end
 #            vec_x += alpha*vec_p #Line 7
@@ -54,7 +54,7 @@ module rscg
         
             #---- Lines 12-17
             for j in 1:n_omega
-                update = ifelse(abs(vec_rhok[j]) > ep,true,false)
+                update = ifelse(abs(vec_rhok[j]) > eps,true,false)
                 if update
                     vec_rhokp[j] = vec_rhok[j]*vec_rhokm[j]*alpham/(vec_rhokm[j]*alpham*(1.0+alpha*vec_sigma[j])+alpha*betam*(vec_rhokm[j]-vec_rhok[j]))#Line 13
                     vec_alpha[j] = alpha*vec_rhokp[j]/vec_rhok[j]#Line 14
@@ -62,13 +62,7 @@ module rscg
                     vec_beta[j] = ((vec_rhokp[j]/vec_rhok[j])^2)*beta #Line 16
                     vec_Pi[j] = vec_rhokp[j]*Sigma+ vec_beta[j]*vec_Pi[j] #Line 17
                 end
-                #=
-                vec_rhokp[j] = ifelse(update,vec_rhok[j]*vec_rhokm[j]*alpham/(vec_rhokm[j]*alpham*(1.0+alpha*vec_sigma[j])+alpha*betam*(vec_rhokm[j]-vec_rhok[j])), vec_rhok[j])#Line 13
-                vec_alpha[j] = ifelse(update, alpha*vec_rhokp[j]/vec_rhok[j],0.0)#Line 14
-                vec_Theta[j] = vec_Theta[j]+vec_alpha[j]*vec_Pi[j] #Line 15
-                vec_beta[j] = ifelse(update,((vec_rhokp[j]/vec_rhok[j])^2)*beta,1.0) #Line 16
-                vec_Pi[j] = ifelse(update,vec_rhokp[j]*Sigma+ vec_beta[j]*vec_Pi[j],vec_Pi[j]) #Line 17
-                =#
+
                 vec_g[j] = vec_Theta[j]
                 vec_rhokm[j] = vec_rhok[j]
                 vec_rhok[j] = vec_rhokp[j]
@@ -80,18 +74,83 @@ module rscg
             alpham = alpha
             betam = beta
             hi = rsum
-            #println(ite," ",vec_r'*vec_r)
-            #println(sum(-A*vec_x+vec_b))
- #           println(rsum)
 
 
         end
     
-        #println(sum(A*vec_x))
-        #println("answer? ",sum(A*vec_x+vec_b))
-        #println(" d ",vec_x[1])
         return vec_g
     end
+
+    function RSCG_vec(eps,vec_left,right_j,σ,A,n)
+        N=length(σ)
+        b = zeros(Float64,n)
+        b[right_j] = 1.0
+
+        m = length(vec_left)
+        kmax = 20000
+
+    #--Line 2 in Table III.
+        x = zeros(Float64,n)
+        r = copy(b)  
+        p = copy(b)
+        αm = 1.0
+        βm = 0.0
+    #--
+        Σ =zeros(Float64,m)
+        for mm=1:m
+            Σ[mm] = b[vec_left[mm]] #Line 3
+        end        
+        Θ = zeros(Complex{Float64},N,m)
+        Π = ones(Complex{Float64},N,m)
+        for mm=1:m
+            Π[:,mm] *= Σ[mm]
+        end
+        ρk = ones(Complex{Float64},N)
+        ρkm = copy(ρk)
+        ρkp = copy(ρk)
+        Ap = similar(p)
+    
+        for k=0:kmax
+            A_mul_B!(Ap,A,-p)
+            rnorm = r'*r
+            α = rnorm/(p'*Ap)
+            x += α*p #Line 7
+            r += -α*Ap #Line 8
+            β = r'*r/rnorm #Line9
+            p = r + β*p #Line 10
+        
+            for mm=1:m
+                Σ[mm] = r[vec_left[mm]] #Line 11
+            end    
+            
+            for j = 1:N
+                update = ifelse(abs(ρk[j]) > eps,true,false)
+                if update
+                    ρkp[j] = ρk[j]*ρkm[j]*αm/(ρkm[j]*αm*(1.0+α*σ[j])+α*βm*(ρkm[j]-ρk[j]))#Line 13
+                    αkj = α*ρkp[j]/ρk[j]#Line 14
+                    Θ[j,:] += αkj*Π[j,:] #Line 15
+                    βkj = ((ρkp[j]/ρk[j])^2)*β #Line 16
+                    Π[j,:] = ρkp[j]*Σ+ βkj*Π[j,:] #Line 17
+
+                end
+                ρkm[j] = ρk[j]
+                ρk[j] = ρkp[j]
+            end
+            αm = α
+            βm = β
+            hi = rnorm
+            if hi < eps
+                return Θ
+            end
+        end
+    
+    
+        println("Not converged")
+        return Θ
+
+    end
+
+
 
     function calc_meanfields_full_finite(A,Nx,Ny,Ln,T,omegamax)
 
@@ -210,10 +269,6 @@ module rscg
     
         vec_sigma = zeros(Complex{Float64},2*n_omega)
 
-#        shift = 3.0
-#        for i=1:Ln
-#            A[i,i] = A[i,i] + shift
-#        end
     
         for n=1:2*n_omega# in range(2*n_omega):
             #println(π*T*(2.0*(n-n_omega-1)+1)*im)
@@ -229,13 +284,53 @@ module rscg
                 jj = ii + Nx*Ny
                 right_j = jj
                 left_i = ii
-                vec_g = RSCG(eps,2*n_omega,left_i,right_j,vec_sigma,A,Ln)
+                vec_left = [left_i]
+                vec_g = RSCG_vec(eps,vec_left,right_j,vec_sigma,A,Ln)[:,1]
+            
+#                vec_g = RSCG(eps,2*n_omega,left_i,right_j,vec_sigma,A,Ln)
                 vec_g += -1./(vec_sigma.*vec_sigma)
                 cc[ii,ii] = real(T*sum(vec_g))-1/(T*4)
             end
         end
 
         return cc
+    end
+
+    function calc_meanfields_RSCG_both(eps,A,Nx,Ny,Ln,T,omegamax)
+
+        cc = spzeros(Nx*Ny,Nx*Ny) #lil_matrix((Nx*Ny,Nx*Ny))
+        cdc = spzeros(Nx*Ny,Nx*Ny)
+#    omegamax = omegac #pi*T(2*n+1), omegac/(T*pi)
+        n_omega = Int((Int(omegamax/(T*pi)))/2-1)
+    
+        vec_sigma = zeros(Complex{Float64},2*n_omega)
+
+        for n=1:2*n_omega# in range(2*n_omega):
+            #println(π*T*(2.0*(n-n_omega-1)+1)*im)
+            vec_sigma[n] = π*T*(2.0*(n-n_omega-1)+1)*im#+shift
+        end
+    
+
+
+    
+        for ix= 1:Nx#  in range(Nx):
+            for iy= 1:Ny#  in range(Ny):
+                ii = (iy-1)*Nx+ix                
+                jj = ii + Nx*Ny
+                right_j = jj
+                left_i = ii
+                vec_left = [ii,ii+Nx*Ny]
+                vec_g = RSCG_vec(eps,vec_left,right_j,vec_sigma,A,Ln)
+
+                vec_g[:,1] += -1./(vec_sigma.*vec_sigma)
+                vec_g[:,2] += -1./(vec_sigma)
+                cc[ii,ii] = real(T*sum(vec_g[:,1]))-1/(T*4)
+                cdc[ii,ii] = real(T*sum(vec_g[:,2]))+1/2
+                cdc[ii,ii] = 1-cdc[ii,ii] 
+            end
+        end
+
+        return cc,cdc
     end
 
 end
