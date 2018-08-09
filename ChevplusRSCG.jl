@@ -1,11 +1,14 @@
-include("ChebyshevPolynomial.jl")
-include("RSCG.jl")
 
 
-module ChevplusRSCG
-    import chebyshev
-    import rscg
-    import Plots
+using Distributed
+@everywhere module ChevplusRSCGsolver
+    include("ChebyshevPolynomial.jl")
+    include("RSCG.jl")
+    using .Chebyshev
+    using .Rscgsolver
+    using SparseArrays
+    using LinearAlgebra
+#    import Plots
 
     function calc_A(Nx,Ny,μ,Δ,aa)
         Ln = Nx*Ny*2
@@ -82,10 +85,14 @@ module ChevplusRSCG
     
     function iteration(nc,Nx,Ny,aa,bb,ωc,U,initialΔ,μ,full,RSCG,finite,T,Hartree,omegamax,itemax)
 
-        Δ = speye(Nx*Ny,Nx*Ny)*initialΔ
-        Δold = speye(Nx*Ny,Nx*Ny)*initialΔ     
-        A = calc_A(Nx,Ny,μ,Δ,aa)        
-        HF = speye(Nx*Ny,Nx*Ny)*0.01
+        #Δ = speye(Nx*Ny,Nx*Ny)*initialΔ
+        Δ = sparse(initialΔ*I, Nx*Ny, Nx*Ny)
+    
+        Δold = sparse(initialΔ*I, Nx*Ny, Nx*Ny)
+        #Δold = speye(Nx*Ny,Nx*Ny)*initialΔ     
+        A = calc_A(Nx,Ny,μ,Δ,aa)     
+        HF = sparse(0.01*I, Nx*Ny, Nx*Ny)
+        #HF = speye(Nx*Ny,Nx*Ny)*0.01
         HFold = copy(HF)*0.0 
 
         mat_Δ = zeros(typeof(Δ[1,1]),Nx,Ny)    
@@ -96,30 +103,30 @@ module ChevplusRSCG
             if full
                 if finite
                     #println("Green's function based full diazonalization")
-                    @time Δ = rscg.calc_meanfields_full_finite(aa*A,Nx,Ny,Nx*Ny*2,T,omegamax) 
+                    @time Δ = Rscgsolver.calc_meanfields_full_finite(aa*A,Nx,Ny,Nx*Ny*2,T,omegamax) 
                     if Hartree
-                        @time HF = rscg.calc_meanfields_full_finite_HF(aa*A,Nx,Ny,Nx*Ny*2,T,omegamax) 
+                        @time HF = Rscgsolver.calc_meanfields_full_finite_HF(aa*A,Nx,Ny,Nx*Ny*2,T,omegamax) 
                     end
                 else
                     #println("Full diagonalization")
-                    @time Δ = chebyshev.calc_meanfields(aa*A,Nx,Ny,ωc) 
+                    @time Δ = Chebyshev.calc_meanfields(aa*A,Nx,Ny,ωc) 
                     if Hartree
-                        @time HF = chebyshev.calc_meanfields_HF(aa*A,Nx,Ny,ωc) 
+                        @time HF = Chebyshev.calc_meanfields_HF(aa*A,Nx,Ny,ωc) 
                     end
                 end
             else
                 if RSCG
                     
                     if Hartree
-                        @time Δ,HF =rscg.calc_meanfields_RSCG_both(1e-15,aa*A,Nx,Ny,Nx*Ny*2,T,omegamax)
+                        @time Δ,HF =Rscgsolver.calc_meanfields_RSCG_both(1e-15,aa*A,Nx,Ny,Nx*Ny*2,T,omegamax)
                     else
-                        @time Δ =rscg.calc_meanfields_RSCG(1e-15,aa*A,Nx,Ny,Nx*Ny*2,T,omegamax)
+                        @time Δ =Rscgsolver.calc_meanfields_RSCG(1e-15,aa*A,Nx,Ny,Nx*Ny*2,T,omegamax)
                     end
                 else
                     #println("Chebyshev")
-                    @time Δ = chebyshev.calc_meanfields(nc,A,Nx,Ny,aa,bb,ωc)
+                    @time Δ = Chebyshev.calc_meanfields(nc,A,Nx,Ny,aa,bb,ωc)
                     if Hartree
-                        @time HF = chebyshev.calc_meanfields_HF(nc,A,Nx,Ny,aa,bb,ωc)
+                        @time HF = Chebyshev.calc_meanfields_HF(nc,A,Nx,Ny,aa,bb,ωc)
                     end
                 end
             end

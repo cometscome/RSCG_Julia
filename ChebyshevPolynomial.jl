@@ -1,8 +1,21 @@
-module chebyshev
+
+module Chebyshev
     export calc_meanfields,calc_meanfields_HF
+    using SparseArrays
+    using LinearAlgebra
+    using Distributed
+
+
 
     function calc_meanfields(nc,A,Nx,Ny,aa,bb,ωc)
         cc = spzeros(typeof(A[1,Nx*Ny]),Nx*Ny,Nx*Ny)
+        dj = Nx*Ny
+        vec_c = pmap(ii -> calc_meanfield_i(ii,dj,nc,A,aa,bb,ωc,Nx,Ny),1:Nx*Ny)
+        for ii=1:Nx*Ny
+            cc[ii,ii] = vec_c[ii]
+        #calc_meanfield_i(ii,nc,A,aa,bb,ωc,Nx,Ny)
+        end
+        #=
         for ix=1:Nx
             for iy=1:Ny
                 ii = (iy-1)*Nx+ix
@@ -11,11 +24,25 @@ module chebyshev
                 cc[ii,ii] = calc_meanfield(vec_ai,aa,bb,ωc,nc)
             end
         end
+    =#
         return cc
+    end
+
+    function calc_meanfield_i(ii,dj,nc,A,aa,bb,ωc,Nx,Ny)
+        jj = ii + dj
+        vec_ai = calc_polynomials(nc,ii,jj,A)
+        return calc_meanfield(vec_ai,aa,bb,ωc,nc)
     end
 
     function calc_meanfields_HF(nc,A,Nx,Ny,aa,bb,ωc)
         cdc = spzeros(typeof(A[1,Nx*Ny]),Nx*Ny,Nx*Ny)
+        dj = 0
+        vec_c = pmap(ii -> calc_meanfield_i(ii,dj,nc,A,aa,bb,ωc,Nx,Ny),1:Nx*Ny)
+        for ii=1:Nx*Ny
+            cdc[ii,ii] = vec_c[ii]
+        #calc_meanfield_i(ii,nc,A,aa,bb,ωc,Nx,Ny)
+        end
+        #=
         for ix=1:Nx
             for iy=1:Ny
                 ii = (iy-1)*Nx+ix
@@ -24,14 +51,15 @@ module chebyshev
                 cdc[ii,ii] = calc_meanfield(vec_ai,aa,bb,ωc,nc)
             end
         end
+    =#
         return cdc
     end
 
     function calc_meanfields(A,Nx,Ny,ωc)
        
         cc = spzeros(typeof(A[1,Nx*Ny]),Nx*Ny,Nx*Ny)
-        A = full(A)
-        w,v = eig(A)
+        A = Matrix(A)
+        w,v = eigen(A)
         
         
     
@@ -57,8 +85,8 @@ module chebyshev
     function calc_meanfields_HF(A,Nx,Ny,ωc)
        
         cdc = spzeros(typeof(A[1,Nx*Ny]),Nx*Ny,Nx*Ny)
-        A = full(A)
-        w,v = eig(A)
+        A = Matrix(A)
+        w,v = eigen(A)
         
         
     
@@ -103,9 +131,11 @@ module chebyshev
             if nn == 0
                 vec_jn[right_j] = 1.0
             elseif nn == 1
-                A_mul_B!(vec_jn,A,vec_jnm)
+                mul!(vec_jn, A, vec_jnm)
+                #A_mul_B!(vec_jn,A,vec_jnm)
             else
-                A_mul_B!(vec_jn,A,vec_jnm)
+                mul!(vec_jn, A, vec_jnm)
+                #A_mul_B!(vec_jn,A,vec_jnm)
 #                vec_jn *= 2
                 for i=1:Ln
                     vec_jn[i] = vec_jn[i]*2 -vec_jnmm[i]

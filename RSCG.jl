@@ -1,6 +1,11 @@
-module rscg
-    
-    function RSCG(eps,n_omega,left_i,right_j,vec_sigma,A,Ln)
+
+module Rscgsolver
+    export calc_meanfields_RSCG_both
+    using SparseArrays
+    using LinearAlgebra
+    using Distributed
+
+    function RSCGs(eps,n_omega,left_i,right_j,vec_sigma,A,Ln)
 
     #--Line 2 in Table III.
         vec_x = zeros(Float64,Ln)
@@ -34,7 +39,8 @@ module rscg
         for ite in 1:200
         #while abs(hi) > eps        
             #vec_Ap = 
-            A_mul_B!(vec_Ap,A,-vec_p)   
+            mul!(vec_Ap, A, -vec_p)
+#            A_mul_B!(vec_Ap,A,-vec_p)   
             rsum = vec_r'*vec_r#  dot(vec_r,vec_r) #(rk,rk)
             pAp = vec_p'*vec_Ap
             alpha = rsum/pAp #np.dot(vec_p,vec_Ap) #Line 6 (rk,rk)/(pk,A pk)
@@ -111,7 +117,8 @@ module rscg
         Ap = similar(p)
     
         for k=0:kmax
-            A_mul_B!(Ap,A,-p)
+            mul!(Ap,A,-p)
+            #A_mul_B!(Ap,A,-p)
             rnorm = r'*r
             α = rnorm/(p'*Ap)
             x += α*p #Line 7
@@ -163,8 +170,8 @@ module rscg
         for n=1:2*n_omega
             vec_sigma[n] = π*T*(2.0*(n-n_omega-1)+1)*im
         end
-        A = full(A)
-        w,v = eig(A)
+        A = Matrix(A)
+        w,v = eigen(A)
 
     
         for ix= 1:Nx#  in range(Nx):
@@ -174,7 +181,7 @@ module rscg
                 right_j = jj
                 left_i = ii
                 vec_g = calc_green(w,v,2*n_omega,left_i,right_j,vec_sigma,A,Ln)
-                vec_g += -1./(vec_sigma.*vec_sigma)
+                vec_g += -1 ./(vec_sigma.*vec_sigma)
                 cc[ii,ii] = real(T*sum(vec_g))-1/(T*4)
                 
                 #stop
@@ -195,8 +202,8 @@ module rscg
         for n=1:2*n_omega
             vec_sigma[n] = π*T*(2.0*(n-n_omega-1)+1)*im
         end
-        A = full(A)
-        w,v = eig(A)
+        A = Matrix(A)
+        w,v = eigen(A)
 
     
         for ix= 1:Nx#  in range(Nx):
@@ -206,7 +213,7 @@ module rscg
                 right_j = jj
                 left_i = ii         
                 vec_g = calc_green(w,v,2*n_omega,left_i,right_j,vec_sigma,A,Ln)
-                vec_g += -1./vec_sigma
+                vec_g += -1 ./vec_sigma
                 
                 cdc[ii,ii] = real(T*sum(vec_g))+1/2
             end
@@ -252,7 +259,7 @@ module rscg
                 right_j = jj#+ Nx*Ny
                 left_i = ii#+ Nx*Ny
                 vec_g = RSCG(eps,2*n_omega,left_i,right_j,vec_sigma,A,Ln)
-                vec_g += -1./vec_sigma
+                vec_g += -1 ./vec_sigma
                 cc[ii,ii] = real(T*sum(vec_g))+1/2
             end
         end
@@ -275,9 +282,13 @@ module rscg
             vec_sigma[n] = π*T*(2.0*(n-n_omega-1)+1)*im#+shift
         end
     
+        vec_c = pmap(ii -> calc_meanfields_RSCG_i(ii,vec_sigma,A,Ln,T,Nx,Ny,eps),1:Nx*Ny)
+        for ii=1:Nx*Ny
+            cc[ii,ii] = vec_c[ii]
+            #calc_meanfields_RSCG_i(ii,vec_sigma,A,Ln,T,Nx,Ny,eps)
+        end
 
-
-    
+        #=
         for ix= 1:Nx#  in range(Nx):
             for iy= 1:Ny#  in range(Ny):
                 ii = (iy-1)*Nx+ix                
@@ -288,13 +299,28 @@ module rscg
                 vec_g = RSCG_vec(eps,vec_left,right_j,vec_sigma,A,Ln)[:,1]
             
 #                vec_g = RSCG(eps,2*n_omega,left_i,right_j,vec_sigma,A,Ln)
-                vec_g += -1./(vec_sigma.*vec_sigma)
+                vec_g += -1 ./(vec_sigma.*vec_sigma)
                 cc[ii,ii] = real(T*sum(vec_g))-1/(T*4)
             end
         end
+    =#
 
         return cc
     end
+
+    function calc_meanfields_RSCG_i(ii,vec_sigma,A,Ln,T,Nx,Ny,eps)
+        jj = ii + Nx*Ny
+        right_j = jj
+        left_i = ii
+        vec_left = [left_i]
+        vec_g = RSCG_vec(eps,vec_left,right_j,vec_sigma,A,Ln)[:,1]
+            
+#                vec_g = RSCG(eps,2*n_omega,left_i,right_j,vec_sigma,A,Ln)
+        vec_g += -1 ./(vec_sigma.*vec_sigma)
+        return real(T*sum(vec_g))-1/(T*4)
+    end
+
+    
 
     function calc_meanfields_RSCG_both(eps,A,Nx,Ny,Ln,T,omegamax)
 
@@ -310,9 +336,15 @@ module rscg
             vec_sigma[n] = π*T*(2.0*(n-n_omega-1)+1)*im#+shift
         end
     
-
-
+        vec_cs = pmap(ii -> calc_meanfields_RSCG_both_i(ii,vec_sigma,A,Ln,T,Nx,Ny,eps),1:Nx*Ny)
     
+        for ii=1:Nx*Ny
+            cc_i,cdc_i = vec_cs[ii]#calc_meanfields_RSCG_both_i(ii,vec_sigma,A,Ln,T,Nx,Ny,eps)        
+            cc[ii,ii] = cc_i
+            cdc[ii,ii] = cdc_i
+        end
+
+        #=
         for ix= 1:Nx#  in range(Nx):
             for iy= 1:Ny#  in range(Ny):
                 ii = (iy-1)*Nx+ix                
@@ -322,15 +354,33 @@ module rscg
                 vec_left = [ii,ii+Nx*Ny]
                 vec_g = RSCG_vec(eps,vec_left,right_j,vec_sigma,A,Ln)
 
-                vec_g[:,1] += -1./(vec_sigma.*vec_sigma)
-                vec_g[:,2] += -1./(vec_sigma)
+                vec_g[:,1] += -1 ./(vec_sigma.*vec_sigma)
+                vec_g[:,2] += -1 ./(vec_sigma)
                 cc[ii,ii] = real(T*sum(vec_g[:,1]))-1/(T*4)
                 cdc[ii,ii] = real(T*sum(vec_g[:,2]))+1/2
                 cdc[ii,ii] = 1-cdc[ii,ii] 
             end
         end
-
+        =#
         return cc,cdc
     end
+
+
+
+    function calc_meanfields_RSCG_both_i(ii,vec_sigma,A,Ln,T,Nx,Ny,eps)
+        jj = ii + Nx*Ny
+        right_j = jj
+        left_i = ii
+        vec_left = [ii,ii+Nx*Ny]
+        vec_g = RSCG_vec(eps,vec_left,right_j,vec_sigma,A,Ln)
+
+        vec_g[:,1] += -1 ./(vec_sigma.*vec_sigma)
+        vec_g[:,2] += -1 ./(vec_sigma)
+        cc_i = real(T*sum(vec_g[:,1]))-1/(T*4)
+        cdc_i = real(T*sum(vec_g[:,2]))+1/2
+        cdc_i = 1-cdc_i
+        return cc_i,cdc_i
+    end
+
 
 end
